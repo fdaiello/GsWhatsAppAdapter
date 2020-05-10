@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Concentus.OggFile" Version="1.0.4" />
+    <PackageReference Include="Microsoft.Bot.Builder.Integration.AspNet.Core" Version="4.8.0" />
+    <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.11.0" />
+    <PackageReference Include="NAudio" Version="1.10.0" />
+    <PackageReference Include="NAudio.Lame" Version="1.1.1" />
+    <PackageReference Include="Universal.Microsoft.Bot.Connector.DirectLine" Version="2.1.1" />
+  </ItemGroup>
+
+</Project>
