@@ -6,7 +6,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Net;
 using System.Security.Claims;
 using System.Security.Principal;
@@ -46,9 +45,9 @@ namespace GsWhatsAppAdapter
         /// <param name="logger">The ILogger implementation this adapter should use.</param>
         public WhatsAppAdapter(IConfiguration configuration, ILogger logger)
         {
-            gsWhatsAppClient = new GsWhatsAppClient(new WhatsAppAdapterOptions(configuration["WhatsAppNumber"], configuration["GsApiKey"], new Uri(configuration["GsApiUri"]), new Uri(configuration["GsMediaUri"])));
+            gsWhatsAppClient = new GsWhatsAppClient(new WhatsAppAdapterOptions(configuration["GsSettings:WaNumber"], configuration["GsSettings:GsApiKey"], new Uri(configuration["GsSettings:GsApiUri"]), new Uri(configuration["GsSettings:GsMediaUri"])));
             speechClient = new SpeechClient(new SpeechOptions(configuration["SpeechSubcriptionKey"], configuration["SpeechRegion"], configuration["Language"]), logger);
-            whatsAppHelper = new WhatsAppHelper(gsWhatsAppClient, speechClient, new Uri( configuration["botUrl"]));
+            whatsAppHelper = new WhatsAppHelper(gsWhatsAppClient, speechClient, new Uri( configuration["BotUrl"]));
             this.logger = logger;
         }
 

@@ -23,6 +23,10 @@ namespace GsWhatsAppAdapter
 		// Constructor
 		public SpeechClient(SpeechOptions options, ILogger logger)
 		{
+			if (options == null)
+			{
+				throw new ArgumentNullException(nameof(options));
+			}
 			SpeechSubcriptionKey = options.SpeechSubcriptionKey;
 			SpeechRegion = options.SpeechRegion;
 			Language = options.Language;
@@ -32,6 +36,10 @@ namespace GsWhatsAppAdapter
 		// Reconhece um Audio Stream no formato Ogg e devolve o texto
 		public async Task<string> RecognizeOggStream(Stream stream, String voiceid)
 		{
+			// valida parametro stream
+			if (stream == null)
+				return string.Empty;
+
 			// Se o diretorio wwwroot\medias nao exite, cria
 			if (!Directory.Exists(Path.Combine(Environment.CurrentDirectory, $@"wwwroot\media\")))
 				Directory.CreateDirectory(Path.Combine(Environment.CurrentDirectory, $@"wwwroot\media\"));
@@ -45,7 +53,7 @@ namespace GsWhatsAppAdapter
 			fs.Dispose();
 
 			// gera novo nome para salvar nova versão convertido pra Wave
-			string filename2 = filename.Replace(".ogg", ".wav");
+			string filename2 = filename.Replace(".ogg", ".wav", StringComparison.InvariantCultureIgnoreCase);
 
 			// se ja existe arquivo com este nome ... 
 			if (File.Exists(filename2))
@@ -128,8 +136,8 @@ namespace GsWhatsAppAdapter
 			if (inline == "Um.")
 				inline = "1";
 
-			else if (inline.Replace(".", "").All(char.IsDigit))
-				inline = inline.Replace(".", "");
+			else if (inline.Replace(".", "",StringComparison.InvariantCulture).All(char.IsDigit))
+				inline = inline.Replace(".", "",StringComparison.InvariantCulture);
 
 			return (inline);
 		}
@@ -178,7 +186,6 @@ namespace GsWhatsAppAdapter
 					{
 						Logger.LogError($"CANCELED: ErrorCode={cancellation.ErrorCode}");
 						Logger.LogError($"CANCELED: ErrorDetails=[{cancellation.ErrorDetails}]");
-						Logger.LogError($"CANCELED: Did you update the subscription info?");
 					}
 					return (false);
 				}
