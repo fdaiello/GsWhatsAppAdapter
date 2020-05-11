@@ -1,7 +1,7 @@
 ﻿using NAudio.Lame;
 using NAudio.Wave;
 
-namespace Mp3Codec
+namespace GsWhatsAppAdapter
 {
 	public static class Mp3Converter
 	{

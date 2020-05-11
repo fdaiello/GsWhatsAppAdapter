@@ -2,7 +2,7 @@
 using Concentus.Structs;
 using Microsoft.CognitiveServices.Speech;
 using Microsoft.CognitiveServices.Speech.Audio;
-using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using NAudio.Wave;
 using System;
 using System.IO;
@@ -12,17 +12,21 @@ using System.Threading.Tasks;
 namespace GsWhatsAppAdapter
 {
 	// Utility Methods
-	public class Speech
+	public class SpeechClient
 	{
 		// Variaveis lidas de AppSettings
 		private readonly string SpeechSubcriptionKey;
 		private readonly string SpeechRegion;
+		private readonly string Language;
+		private readonly ILogger Logger;
 
 		// Constructor
-		public Speech(IOptions<SpeechSettings> speechsettings)
+		public SpeechClient(SpeechOptions options, ILogger logger)
 		{
-			SpeechSubcriptionKey = speechsettings.Value.SpeechSubcriptionKey;
-			SpeechRegion = speechsettings.Value.SpeechRegion;
+			SpeechSubcriptionKey = options.SpeechSubcriptionKey;
+			SpeechRegion = options.SpeechRegion;
+			Language = options.Language;
+			Logger = logger;
 		}
 
 		// Reconhece um Audio Stream no formato Ogg e devolve o texto
@@ -30,7 +34,7 @@ namespace GsWhatsAppAdapter
 		{
 			// Se o diretorio wwwroot\medias nao exite, cria
 			if (!Directory.Exists(Path.Combine(Environment.CurrentDirectory, $@"wwwroot\media\")))
-				Directory.CreateDirectory((Path.Combine(Environment.CurrentDirectory, $@"wwwroot\media\")));
+				Directory.CreateDirectory(Path.Combine(Environment.CurrentDirectory, $@"wwwroot\media\"));
 			
 			// Cria o nome do arquivo
 			string filename = Path.Combine(Environment.CurrentDirectory, $@"wwwroot\media\Audio_{voiceid}.ogg");
@@ -141,8 +145,7 @@ namespace GsWhatsAppAdapter
 
 				// Sets the synthesis language.
 				// https://docs.microsoft.com/azure/cognitive-services/speech-service/language-support
-				var language = "pt-BR";
-				config.SpeechSynthesisLanguage = language;
+				config.SpeechSynthesisLanguage = Language;
 
 				// Sets the voice name.
 				// e.g. "Microsoft Server Speech Text to Speech Voice (en-US, JessaRUS)"
@@ -164,19 +167,18 @@ namespace GsWhatsAppAdapter
 
 				if (result.Reason == ResultReason.SynthesizingAudioCompleted)
 				{
-					Console.WriteLine($"Speech synthesized to speaker for text [{text}] with language [{language}]");
 					return (true);
 				}
 				else if (result.Reason == ResultReason.Canceled)
 				{
 					var cancellation = SpeechSynthesisCancellationDetails.FromResult(result);
-					Console.WriteLine($"CANCELED: Reason={cancellation.Reason}");
+					Logger.LogError($"CANCELED: Reason={cancellation.Reason}");
 
 					if (cancellation.Reason == CancellationReason.Error)
 					{
-						Console.WriteLine($"CANCELED: ErrorCode={cancellation.ErrorCode}");
-						Console.WriteLine($"CANCELED: ErrorDetails=[{cancellation.ErrorDetails}]");
-						Console.WriteLine($"CANCELED: Did you update the subscription info?");
+						Logger.LogError($"CANCELED: ErrorCode={cancellation.ErrorCode}");
+						Logger.LogError($"CANCELED: ErrorDetails=[{cancellation.ErrorDetails}]");
+						Logger.LogError($"CANCELED: Did you update the subscription info?");
 					}
 					return (false);
 				}

@@ -1,16 +1,18 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
-// Licensed under the MIT License.
+﻿// Helper para o WhatsApp Adapter
+// Faz o meio de campo entre as requisições, a API do WhatsApp,
+// e o serviços de reconhecimento e sintese de Voz
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Bot.Connector;
 using Microsoft.Bot.Schema;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
 namespace GsWhatsAppAdapter
@@ -18,44 +20,28 @@ namespace GsWhatsAppAdapter
     /// <summary>
     /// A helper class to create Activities and WhatsApp messages.
     /// </summary>
-    internal static class WhatsAppHelper
+    internal class WhatsAppHelper
     {
-        /// <summary>
-        /// Creates WhatsApp message options object from a Bot Framework <see cref="Activity"/>.
-        /// </summary>
-        /// <param name="activity">The activity.</param>
-        /// <param name="GsWhatsAppNumber">The GsWhatsApp phone number assigned to the bot.</param>
-        /// <returns>The GsWhatsApp message options object.</returns>
-        /// <seealso cref="GsWhatsAppAdapter.SendActivitiesAsync(ITurnContext, Activity[], System.Threading.CancellationToken)"/>
-        public static CreateMessageOptions ActivityToGsWhatsApp(Activity activity, string GsWhatsAppNumber)
+        private bool isspeechturn;
+        private bool querystringused;
+        private string textresponse;
+        private readonly Uri _botUri;
+
+        private readonly GsWhatsAppClient _gsWhatsAppClient;
+        private readonly SpeechClient _speechClient;
+
+
+        internal WhatsAppHelper(GsWhatsAppClient gsWhatsAppClient, SpeechClient speechClient, Uri botUri)
         {
-            if (activity == null)
-            {
-                throw new ArgumentNullException(nameof(activity));
-            }
+            isspeechturn = false;
+            querystringused = false;
+            textresponse = string.Empty;
 
-            if (string.IsNullOrWhiteSpace(GsWhatsAppNumber))
-            {
-                throw new ArgumentNullException(nameof(GsWhatsAppNumber));
-            }
+            _speechClient = speechClient;
+            _gsWhatsAppClient = gsWhatsAppClient;
+            _botUri = botUri;
 
-            var mediaUrls = new List<Uri>();
-            if (activity.Attachments != null)
-            {
-                mediaUrls.AddRange(activity.Attachments.Select(attachment => new Uri(attachment.ContentUrl)));
-            }
-
-            var messageOptions = new CreateMessageOptions(activity.Conversation.Id)
-            {
-                ApplicationSid = activity.Conversation.Id,
-                From = GsWhatsAppNumber,
-                Body = activity.Text,
-                MediaUrl = mediaUrls,
-            };
-
-            return messageOptions;
         }
-
         /// <summary>
         /// Writes the HttpResponse.
         /// </summary>
@@ -65,7 +51,7 @@ namespace GsWhatsAppAdapter
         /// <param name="encoding">The encoding for the text.</param>
         /// <param name="cancellationToken">A cancellation token for the task.</param>
         /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
-        public static async Task WriteAsync(HttpResponse response, int code, string text, Encoding encoding, CancellationToken cancellationToken)
+        internal async Task WriteAsync(HttpResponse response, int code, string text, Encoding encoding, CancellationToken cancellationToken)
         {
             if (response == null)
             {
@@ -85,6 +71,9 @@ namespace GsWhatsAppAdapter
             response.ContentType = "text/plain";
             response.StatusCode = code;
 
+            // ?????
+            text += textresponse;
+
             var data = encoding.GetBytes(text);
 
             await response.Body.WriteAsync(data, 0, data.Length, cancellationToken).ConfigureAwait(false);
@@ -95,37 +84,117 @@ namespace GsWhatsAppAdapter
         /// </summary>
         /// <param name="payload">The HTTP request.</param>
         /// <returns>The activity object.</returns>
-        public static Activity PayloadToActivity(Dictionary<string, string> payload)
+        internal async Task<Activity> PayloadToActivity(HttpRequest httpRequest, ILogger logger)
         {
-            if (payload == null)
+            if (httpRequest == null)
             {
-                throw new ArgumentNullException(nameof(payload));
+                throw new ArgumentNullException(nameof(httpRequest));
             }
-            
-            var GsWhatsAppMessage = JsonConvert.DeserializeObject<GsWhatsAppMessage>(JsonConvert.SerializeObject(payload));
 
-            return new Activity()
+            // Bot Activity que será construido com base na requisição http
+            Activity activity;
+
+            // Se tem parametros passados por Form
+            if (httpRequest.HasFormContentType)
             {
-                Id = GsWhatsAppMessage.MessageSid,
-                Timestamp = DateTime.UtcNow,
-                ChannelId = Channels.GsWhatsApp,
-                Conversation = new ConversationAccount()
+
+                // Busca os parametros e salva em variaveis
+                string botname = httpRequest.Form["botname"];
+                string messageobj = httpRequest.Form["messageobj"];
+
+                // Registra o POST no arquivo de LOG
+                string input = "";
+                if (botname != null)
+                    input += "botname=" + botname;
+                if (messageobj != null)
+                    input += "messageobj=" + messageobj;
+
+                // Grava em um arquivo de Log os dados recebidos
+                logger.LogInformation("GsWhatsAppAdapter-" + System.DateTime.Today.ToString("yyyyMMdd"), System.Environment.NewLine + "in: " + input);
+
+                // Se recebeu messageobject
+                if (messageobj != null)
                 {
-                    Id = GsWhatsAppMessage.From ?? GsWhatsAppMessage.Author,
-                },
-                From = new ChannelAccount()
+
+                    // Desserializa o objeto mensagem
+                    GsMessageObj gsinmessage = JsonConvert.DeserializeObject<GsMessageObj>(messageobj);
+
+                    // Confere se o tipo da mensagem é texto
+                    if (gsinmessage.Type == "text" || gsinmessage.Type == "image")
+                    {
+
+                        // constroi a Activity com base no que veio na requisição
+                        activity = ActivityBuilder(gsinmessage.From, gsinmessage.Type, gsinmessage.Text, gsinmessage.Timestamp, gsinmessage.Url);
+
+                    }
+                    else if (gsinmessage.Type == "voice" | gsinmessage.Type == "audio")
+                    {
+                        // Busca a stream com o audio via Gs API
+                        Stream stream = await _gsWhatsAppClient.GetVoice(botname, gsinmessage.Voice.Id);
+
+                        // Tenta reconhecer o Audio
+                        string speechtotext = await _speechClient.RecognizeOggStream(stream, gsinmessage.Voice.Id);
+
+                        // Se Reconheceu com sucesso
+                        if (!string.IsNullOrEmpty(speechtotext) && speechtotext != "NOMATCH" && !speechtotext.StartsWith("CANCELED"))
+                        {
+                            // Sinaliza que o turno tem conversa
+                            isspeechturn = true;
+
+                            // constroi a Activity com base no que veio na requisição
+                            activity = ActivityBuilder(gsinmessage.From, "text", speechtotext, gsinmessage.Timestamp);
+
+                        }
+                        else
+                            // constroi a Activity com base no que veio na requisição
+                            activity = ActivityBuilder(gsinmessage.From, gsinmessage.Type, gsinmessage.Text, gsinmessage.Timestamp, null, gsinmessage.Voice.Id, stream);
+
+                    }
+                    else if (gsinmessage.Type == "event")
+                        // constroi a Activity com base no que veio na requisição
+                        activity = ActivityBuilder(gsinmessage.From, gsinmessage.Type, gsinmessage.Text, gsinmessage.Timestamp, null);
+
+                    else
+                    { 
+                        // constroi a Activity com base no que veio na requisição
+                        activity = ActivityBuilder(gsinmessage.From, gsinmessage.Type, gsinmessage.Text, gsinmessage.Timestamp, null);
+
+                        // Grava em um arquivo de Log indicando que veio um tipo não esperado
+                        logger.LogInformation("GsWhatsAppAdapter-" + System.DateTime.Today.ToString("yyyyMMdd"), $"Tipo de mensagem não esperado: {gsinmessage.Type}");
+                    }
+
+                }
+                else
                 {
-                    Id = GsWhatsAppMessage.From ?? GsWhatsAppMessage.Author,
-                },
-                Recipient = new ChannelAccount()
+                    // Grava em um arquivo de Log com a mensagem respondida
+                    logger.LogInformation("GsWhatsAppAdapter-" + System.DateTime.Today.ToString("yyyyMMdd"), "Msg Obj Missing");
+
+                    throw new ArgumentException("Msg Obj Missing");
+                }
+            }
+            else
+            {
+                // Confere se vieram parametros corretos por querystring
+                if (!string.IsNullOrEmpty(httpRequest.Query["text"]) && !string.IsNullOrEmpty(httpRequest.Query["from"]))
                 {
-                    Id = GsWhatsAppMessage.To,
-                },
-                Text = GsWhatsAppMessage.Body,
-                ChannelData = GsWhatsAppMessage,
-                Type = ActivityTypes.Message,
-                Attachments = int.TryParse(GsWhatsAppMessage.NumMedia, out var numMediaResult) && numMediaResult > 0 ? GetMessageAttachments(numMediaResult, payload) : null,
-            };
+                    // marca em flag pra saber lidar com o retorno
+                    querystringused = true;
+
+                    // monta atividade com base nos parametros query string
+                    activity = ActivityBuilder(httpRequest.Query["from"], "text", httpRequest.Query["text"], DateTime.Now.ToString(), "");
+                }
+                else
+                {
+                    // Grava em um arquivo de Log com a mensagem respondida
+                    logger.LogInformation("GsWhatsAppAdapter-" + System.DateTime.Today.ToString("yyyyMMdd"), "Callback deve ser chamado via POST");
+
+                    throw new ArgumentException("Callback deve ser chamado via POST");
+                }
+            }
+
+            // Retorna a activity
+            return (activity);
+
         }
 
         /// <summary>
@@ -134,7 +203,7 @@ namespace GsWhatsAppAdapter
         /// <param name="numMedia">The number of media items to pull from the message body.</param>
         /// <param name="message">A dictionary containing the GsWhatsApp message elements.</param>
         /// <returns>An Attachments array with the converted attachments.</returns>
-        public static List<Attachment> GetMessageAttachments(int numMedia, Dictionary<string, string> message)
+        private static List<Attachment> GetMessageAttachments(int numMedia, Dictionary<string, string> message)
         {
             var attachments = new List<Attachment>();
             for (var i = 0; i < numMedia; i++)
@@ -154,31 +223,277 @@ namespace GsWhatsAppAdapter
             return attachments;
         }
 
-        /// <summary>
-        /// Converts a query string to a dictionary with key-value pairs.
-        /// </summary>
-        /// <param name="query">The query string to convert.</param>
-        /// <returns>A dictionary with the query values.</returns>
-        public static Dictionary<string, string> QueryStringToDictionary(string query)
+        // Envia uma mensagem para o Bot
+        private static Activity ActivityBuilder(string from, string type, string text, string gsmessageTimestamp, [Optional] string url, [Optional] string voiceid, [Optional] Stream stream)
         {
-            var values = new Dictionary<string, string>();
-            if (string.IsNullOrWhiteSpace(query))
+            // Instancia uma nova Activity
+            Activity activity = new Activity
             {
-                return values;
+                From = new ChannelAccount { Id = from },
+                Type = ActivityTypes.Message,
+                Id = gsmessageTimestamp,
+                Timestamp = DateTime.Now,
+                ChannelId = "whatsapp"
+            };
+
+            // Verifica o tipo da mensagem e os atributos que devem ser atribuidos
+            if (type == "text")
+            {
+                activity.Text = text;
+            }
+            else if (type == "image")
+            {
+                activity.Attachments = new Attachment[1];
+                activity.Attachments[0] = CreateAttachment(url, "image/png");
+
+            }
+            else if (type == "voice")
+            {
+                activity.Attachments = new Attachment[1];
+                activity.Attachments[0] = CreateInlineAttachment(voiceid, "audio/ogg", stream);
+            }
+            else if (type == "event")
+            {
+                activity.Type = ActivityTypes.Event;
             }
 
-            var pairs = query.Replace("+", "%20").Split('&');
+            
+            return (activity);
 
-            foreach (var p in pairs)
+        }
+		// Envia uma atividade para o WhatsApp
+		public async Task<string> SendActivityToWhatsApp(Activity activity)
+		{
+            string id = string.Empty;
+
+			// Se for uma mensagem de texto
+			if (activity.Text != null)
+			{
+				// Recupera a mensagem
+				string reply = activity.Text;
+
+				// Se está conversando por Audio
+				if (isspeechturn)
+					// envia o texto como Audio
+					id = await SendVoice(activity.Text, activity.Id, activity.Recipient.Id);
+
+				// Confere se tem Suggested Actions ( ações sugeridas )
+				if (activity.SuggestedActions != null && activity.SuggestedActions.Actions.Count() > 0)
+				{
+					// Adiciona a resposta as ações sugeridas
+					foreach (CardAction sugestedaction in activity.SuggestedActions.Actions)
+					{
+						reply += "\n     ```" + sugestedaction.Title + "```";
+					}
+				}
+
+				// Envia a mensagem recebida do Bot de volta para o usuario
+				if (querystringused)
+				{
+					// Se veio requisição por Query String ( geralmente teste ), devolve na requisição http
+					if (!string.IsNullOrEmpty(textresponse)) textresponse += "\n";
+                    textresponse += reply;
+				}
+				else
+					// Se não é teste, envia via API ( se enviar na mesma requisição, fica grudado na mesma mensagem )
+					id = await _gsWhatsAppClient.SendText(activity.Recipient.Id, reply);
+
+			}
+
+			// Are there any attachments?
+			if (activity.Attachments != null)
+			{
+				// Extract each attachment from the activity.
+				foreach (Attachment attachment in activity.Attachments)
+				{
+					// Processa anexos recebidos do BOT e que devem ser enviados para o cliente
+					switch (attachment.ContentType)
+					{
+						case "image/png":
+						case "image/jpg":
+						case "image/jpeg":
+							// Chama o método para enviar a imagem para o cliente via Gushup API
+							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.image, attachment.Name, new Uri(attachment.ContentUrl), new Uri(attachment.ThumbnailUrl));
+                            break;
+
+						case "application/pdf":
+							// Chama o método para enviar o video para o cliente via Gushup API
+							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.file, attachment.Name, new Uri(attachment.ContentUrl));
+                            break;
+
+						case "video/mpeg":
+							// Chama o método para enviar o video para o cliente via Gushup API
+							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.video, attachment.Name, new Uri(attachment.ContentUrl));
+                            break;
+
+						case "audio/ogg":
+							// Chama o método para enviar o video para o cliente via Gushup API
+							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.audio, attachment.Name, new Uri(attachment.ContentUrl));
+                            break;
+
+						case "audio/mp3":
+							// Chama o método para enviar o video para o cliente via Gushup API
+							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.audio, attachment.Name, new Uri(attachment.ContentUrl));
+                            break;
+
+						case "application/vnd.microsoft.card.hero":
+							// Se é conversa por audio
+							if (isspeechturn)
+								// Envia o texto do HeroCard por audio
+								id = await SendVoiceFromHeroText(attachment, activity.Id, activity.Recipient.Id);
+
+							// Se é teste 
+							if (querystringused)
+							{
+								// devolve via http
+								if (!string.IsNullOrEmpty(textresponse)) textresponse += "\n";
+								textresponse += ConvertHeroCardToWhatsApp(attachment);
+							}
+							else
+								// envia para o cliente via API
+								id = await _gsWhatsAppClient.SendText(activity.Recipient.Id, ConvertHeroCardToWhatsApp(attachment));
+
+							break;
+
+					}
+				}
+			}
+
+            return id;
+		}
+
+        // Converte um HeroCard em texto puro
+        private static string ConvertHeroCardToWhatsApp(Attachment attachment)
+        {
+            var heroCard = JsonConvert.DeserializeObject<HeroCard>(attachment.Content.ToString());
+            string waoutput = "";
+
+            if (heroCard != null)
             {
-                var pair = p.Split('=');
-                var key = pair[0];
-                var value = Uri.UnescapeDataString(pair[1]);
+                if (!string.IsNullOrEmpty(heroCard.Title))
+                    waoutput += "*" + heroCard.Title + "*\n";
 
-                values.Add(key, value);
+                if (!string.IsNullOrEmpty(heroCard.Text))
+                    waoutput += heroCard.Text + "\n";
+
+                if (!string.IsNullOrEmpty(waoutput))
+                    waoutput += "\n";
+
+                if (heroCard.Buttons != null)
+                    foreach (CardAction button in heroCard.Buttons)
+                        waoutput += BoldFirstDigit(button.Title) + "\n";
+
+                if (heroCard.Images != null)
+                    foreach (CardImage image in heroCard.Images)
+                        waoutput += image.Url + "\n";
+            }
+            return waoutput;
+        }
+
+        // Pega o título de um Hero Card e envia como Voz
+        private async Task<string> SendVoiceFromHeroText(Attachment herocard, string textid, string usernumber)
+        {
+
+            var heroCard = JsonConvert.DeserializeObject<HeroCard>(herocard.Content.ToString());
+            if (heroCard != null)
+            {
+                if (!string.IsNullOrEmpty(heroCard.Text))
+                    return await SendVoice(heroCard.Text, textid, usernumber);
             }
 
-            return values;
+            return string.Empty;
+        }
+        // Se a linha começa com um digito ( padrão de menu )...
+        //    Adiciona um asterisco antes e outro depois do numero - negrito no whats app
+        private static string BoldFirstDigit(string line)
+        {
+            return line.Substring(0, 1).Replace("1", "*1*").Replace("2", "*2*").Replace("3", "*3*").Replace("4", "*4*").Replace("5", "*5*").Replace("6", "*6*").Replace("7", "*7*").Replace("8", "*8*").Replace("9", "*9*") + line.Substring(1);
+        }
+
+        // Creates an <see cref="Attachment"/> to be sent from the bot to the user from a HTTP URL.
+        private static Attachment CreateAttachment(string url, string contenttype)
+        {
+            // ContentUrl must be HTTPS.
+            return new Attachment
+            {
+                Name = url.Split('/').Last(),
+                ContentType = contenttype,
+                ContentUrl = url
+            };
+        }
+
+        // Cria um Inline Attachment - o conteudo vai dentro do Attachmento, ao inves de uma URL
+        private static Attachment CreateInlineAttachment(string voiceid, string contenttype, Stream stream)
+        {
+            // Copia a stream para um array de bytes - tem que passar por um MemoryStream
+            byte[] bytes = ConverteStreamToByteArray(stream);
+
+            // Gera string com o array de bytes codificado em base64
+            string base64 = Convert.ToBase64String(bytes);
+
+            // ContentUrl Leva os dados inline no formato: "contentUrl": "data:audio/ogg;base64,iVBORw0KGgo…",
+            return new Attachment
+            {
+                Name = voiceid + "." + contenttype.Split("/").Last(),
+                ContentType = contenttype,
+                ContentUrl = "data:" + contenttype + ";base64," + base64
+            };
+        }
+        private static byte[] ConverteStreamToByteArray(Stream stream)
+        {
+            using MemoryStream mStream = new MemoryStream();
+            stream.CopyTo(mStream);
+            return mStream.ToArray();
+        }
+        // Converte um texto em Audio, converte para MP3, e envia
+        private async Task<string> SendVoice(string text, string textid, string usernumber)
+        {
+            // Tira o pipe do Id
+            textid = textid.Replace("|", "");
+
+            // Retira caracteres Unicode ( pra não falar os Emojis )
+            const int MaxAnsiCode = 255;
+            if (text.Any(c => c > MaxAnsiCode))
+            {
+                string cleantext = string.Empty;
+                for (int x = 0; x < text.Length; x++)
+                    if ((int)text[x] <= MaxAnsiCode)
+                        cleantext += text[x];
+                text = cleantext;
+            }
+
+            // Tenta converter o texto para audio
+            if (await _speechClient.TextToSpeechAsync(text, textid))
+            {
+                // Se conseguiu sintetizar o audio com base no texto, converte Wav pra Ogg
+                string filenamewav = Path.Combine(Environment.CurrentDirectory, $@"wwwroot\media\Audio_{textid}.wav");
+                Mp3Converter.WaveToMP3(filenamewav, filenamewav.Replace(".wav", ".mp3"));
+
+                // Chama o método para enviar o video para o cliente via Gushup API
+                string mediaurl = _botUri.ToString() + $@"/media/Audio_{textid}.mp3";
+                return await _gsWhatsAppClient.SendMedia(usernumber, GsWhatsAppClient.Mediatype.audio, filenamewav.Replace(".wav", ""), new Uri(mediaurl));
+            }
+            else
+                return string.Empty;
+        }
+        // Mensagem GupShup vinda no CallBAck da API
+        private class GsMessageObj
+        {
+            public string From { get; set; }
+            public string Id { get; set; }
+            public string Text { get; set; }
+            public string Timestamp { get; set; }
+            public string Type { get; set; }
+            public string Url { get; set; }
+            public string Imgdata { get; set; }
+            public GsVoice Voice { get; set; }
+        }
+        // Mensagem de Voz - padrão GupShup
+        private class GsVoice
+        {
+            public string Id { get; set; }
+            public string Mime_type { get; set; }
+            public string Sha256 { get; set; }
         }
     }
 }

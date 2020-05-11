@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using Newtonsoft.Json;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -16,10 +17,10 @@ namespace GsWhatsAppAdapter
 	{
 
 		// Variaveis de configuração para usar a API
-		private string gsApiKey;
-		private string whatsAppNumber;
-		private Uri gsApiUri;
-		private Uri gsMediaUri;
+		private readonly string gsApiKey;
+		private readonly string whatsAppNumber;
+		private readonly Uri gsApiUri;
+		private readonly Uri gsMediaUri;
 
 		// Constructor
 		public GsWhatsAppClient(WhatsAppAdapterOptions options)
@@ -38,7 +39,7 @@ namespace GsWhatsAppAdapter
 			file,
 			video,
 		}
-		public async Task<Boolean> SendMedia(string destination, Mediatype mediatype, string filename, Uri contentUri, [Optional] Uri thumbnailUri)
+		public async Task<string> SendMedia(string destination, Mediatype mediatype, string filename, Uri contentUri, [Optional] Uri thumbnailUri)
 		{
 
 			if (contentUri == null)
@@ -78,21 +79,24 @@ namespace GsWhatsAppAdapter
 				// Faz a requisição e lê a resposta de forma assíncrona
 				var httpResponseMessage = await httpClient.PostAsync(gsApiUri, httpContent).ConfigureAwait(false);
 				string resp = await httpResponseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
-
 				httpContent.Dispose();
+
+				// Desserializa o objeto mensagem
+				GsReturn gsReturn = JsonConvert.DeserializeObject<GsReturn>(resp);
+
+				// Devolve o Id da mensagem
+				return gsReturn.MessageId;
 			}
 			catch (Exception ex)
 			{
 				Debug.WriteLine("GsApi: SendImages: " + ex);
 				httpClient.Dispose();
-				return false;
+				return string.Empty;
 			}
 
-			httpClient.Dispose();
-			return true;
 		}
 
-		public async Task<Boolean> SendText(string destination, string text)
+		public async Task<string> SendText(string destination, string text)
 		{
 
 			HttpClient httpClient = new HttpClient();
@@ -114,16 +118,20 @@ namespace GsWhatsAppAdapter
 
 				httpContent.Dispose();
 
+				// Desserializa o objeto mensagem
+				GsReturn gsReturn = JsonConvert.DeserializeObject<GsReturn>(resp);
+
+				// Devolve o Id da mensagem
+				return gsReturn.MessageId;
+
 			}
 			catch (Exception ex)
 			{
 				Debug.WriteLine("GsApi: SendText: " + ex);
 				httpClient.Dispose();
-				return false;
+				return string.Empty;
 			}
 
-			httpClient.Dispose();
-			return true;
 		}
 
 		public async Task<Stream> GetVoice(string whatsAppAppname, string voiceID)
@@ -180,5 +188,14 @@ namespace GsWhatsAppAdapter
 				return (stream);
 			}
 		}
+		internal class GsReturn
+		{
+			[JsonProperty("status")]
+			internal string Status { get; set; }
+			[JsonProperty("messageId")]
+			internal string MessageId { get; set; }
+		}
+
 	}
+
 }

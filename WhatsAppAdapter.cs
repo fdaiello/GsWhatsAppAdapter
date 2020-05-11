@@ -19,7 +19,6 @@ using Microsoft.Bot.Builder;
 using Microsoft.Bot.Schema;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace GsWhatsAppAdapter
 {
@@ -28,8 +27,10 @@ namespace GsWhatsAppAdapter
     /// </summary>
     public class WhatsAppAdapter : BotAdapter, IBotFrameworkHttpAdapter
     {
-        private readonly WhatsAppClientWrapper _GsWhatsAppClient;
-        private readonly ILogger _logger;
+        private readonly WhatsAppHelper whatsAppHelper;
+        private readonly GsWhatsAppClient gsWhatsAppClient;
+        private readonly SpeechClient speechClient;
+        private readonly ILogger logger;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="WhatsAppAdapter"/> class using configuration settings.
@@ -43,20 +44,12 @@ namespace GsWhatsAppAdapter
         /// GsMediaUri: URI for retreaving media
         /// </remarks>
         /// <param name="logger">The ILogger implementation this adapter should use.</param>
-        public WhatsAppAdapter(IConfiguration configuration, ILogger logger = null)
-            : this(new WhatsAppClientWrapper(new WhatsAppAdapterOptions(configuration["WhatsAppNumber"], configuration["GsApiKey"], new Uri(configuration["GsApiUri"]), new Uri(configuration["GsMediaUri"]))), logger)
+        public WhatsAppAdapter(IConfiguration configuration, ILogger logger)
         {
-        }
-
-        /// <summary>
-        /// Initializes a new instance of the <see cref="WhatsAppAdapter"/> class.
-        /// </summary>
-        /// <param name="GsWhatsAppClient">The GsWhatsApp client to connect to.</param>
-        /// <param name="logger">The ILogger implementation this adapter should use.</param>
-        public WhatsAppAdapter(WhatsAppClientWrapper GsWhatsAppClient, ILogger logger = null)
-        {
-            _GsWhatsAppClient = GsWhatsAppClient ?? throw new ArgumentNullException(nameof(GsWhatsAppClient));
-            _logger = logger ?? NullLogger.Instance;
+            gsWhatsAppClient = new GsWhatsAppClient(new WhatsAppAdapterOptions(configuration["WhatsAppNumber"], configuration["GsApiKey"], new Uri(configuration["GsApiUri"]), new Uri(configuration["GsMediaUri"])));
+            speechClient = new SpeechClient(new SpeechOptions(configuration["SpeechSubcriptionKey"], configuration["SpeechRegion"], configuration["Language"]), logger);
+            whatsAppHelper = new WhatsAppHelper(gsWhatsAppClient, speechClient, new Uri( configuration["botUrl"]));
+            this.logger = logger;
         }
 
         /// <summary>
@@ -79,22 +72,28 @@ namespace GsWhatsAppAdapter
                 throw new ArgumentException(nameof(activities));
             }
 
+            int loopcount = 0;
             var responses = new List<ResourceResponse>();
             foreach (var activity in activities)
             {
                 if (activity.Type != ActivityTypes.Message)
                 {
-                    _logger.LogTrace($"Unsupported Activity Type: '{activity.Type}'. Only Activities of type 'Message' are supported.");
+                    logger.LogTrace($"Unsupported Activity Type: '{activity.Type}'. Only Activities of type 'Message' are supported.");
                 }
                 else
                 {
-                    var messageOptions = WhatsAppHelper.ActivityToGsWhatsApp(activity, _GsWhatsAppClient.Options.WhatsAppNumber);
-
-                    var res = await _GsWhatsAppClient.SendMessage(messageOptions, cancellationToken).ConfigureAwait(false);
+                    var res = await whatsAppHelper.SendActivityToWhatsApp(activity);
 
                     var response = new ResourceResponse() { Id = res, };
 
                     responses.Add(response);
+                }
+
+                // Se tem mais atividades, espera pra nao grudar as mensagens
+                loopcount++;
+                if (activities.Length > loopcount)
+                {
+                    Task.Delay(2000).Wait();
                 }
             }
 
@@ -129,13 +128,7 @@ namespace GsWhatsAppAdapter
                 throw new ArgumentNullException(nameof(bot));
             }
 
-            Dictionary<string, string> bodyDictionary;
-            using (var bodyStream = new StreamReader(httpRequest.Body))
-            {
-                bodyDictionary = WhatsAppHelper.QueryStringToDictionary(await bodyStream.ReadToEndAsync().ConfigureAwait(false));
-            }
-
-            var activity = WhatsAppHelper.PayloadToActivity(bodyDictionary);
+            var activity = await whatsAppHelper.PayloadToActivity(httpRequest, logger); 
 
             // create a conversation reference
             using (var context = new TurnContext(this, activity))
@@ -146,7 +139,7 @@ namespace GsWhatsAppAdapter
                 var statusCode = Convert.ToInt32(context.TurnState.Get<string>("httpStatus"), CultureInfo.InvariantCulture);
                 var text = context.TurnState.Get<object>("httpBody") != null ? context.TurnState.Get<object>("httpBody").ToString() : string.Empty;
 
-                await WhatsAppHelper.WriteAsync(httpResponse, statusCode, text, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+                await whatsAppHelper.WriteAsync(httpResponse, statusCode, text, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -163,7 +156,7 @@ namespace GsWhatsAppAdapter
         /// <seealso cref="ITurnContext.OnUpdateActivity(UpdateActivityHandler)"/>
         public override Task<ResourceResponse> UpdateActivityAsync(ITurnContext turnContext, Activity activity, CancellationToken cancellationToken)
         {
-            return Task.FromException<ResourceResponse>(new NotSupportedException("GsWhatsApp SMS does not support updating activities."));
+            return Task.FromException<ResourceResponse>(new NotSupportedException("WhatsApp does not support updating activities."));
         }
 
         /// <summary>
@@ -179,7 +172,7 @@ namespace GsWhatsAppAdapter
         /// <seealso cref="ITurnContext.OnDeleteActivity(DeleteActivityHandler)"/>
         public override Task DeleteActivityAsync(ITurnContext turnContext, ConversationReference reference, CancellationToken cancellationToken)
         {
-            return Task.FromException<ResourceResponse>(new NotSupportedException("GsWhatsApp SMS does not support deleting activities."));
+            return Task.FromException<ResourceResponse>(new NotSupportedException("WhatsApp does not support deleting activities."));
         }
 
         /// <summary>

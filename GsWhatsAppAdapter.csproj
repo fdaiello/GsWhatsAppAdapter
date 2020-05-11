@@ -10,7 +10,6 @@
     <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.11.0" />
     <PackageReference Include="NAudio" Version="1.10.0" />
     <PackageReference Include="NAudio.Lame" Version="1.1.1" />
-    <PackageReference Include="Universal.Microsoft.Bot.Connector.DirectLine" Version="2.1.1" />
   </ItemGroup>
 
 </Project>

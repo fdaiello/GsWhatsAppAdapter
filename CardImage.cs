@@ -1,5 +1,5 @@
 ﻿using Newtonsoft.Json;
-using Universal.Microsoft.Bot.Connector.DirectLine;
+using Microsoft.Bot.Schema;
 
 namespace GsWhatsAppAdapter
 {
