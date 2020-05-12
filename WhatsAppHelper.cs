@@ -68,10 +68,9 @@ namespace GsWhatsAppAdapter
                 throw new ArgumentNullException(nameof(encoding));
             }
 
-            response.ContentType = "text/plain";
+            response.ContentType = "text/plain; charset=utf-8";
             response.StatusCode = code;
 
-            // ?????
             text += textresponse;
 
             var data = encoding.GetBytes(text);
@@ -351,7 +350,9 @@ namespace GsWhatsAppAdapter
         // Converte um HeroCard em texto puro
         private static string ConvertHeroCardToWhatsApp(Attachment attachment)
         {
-            var heroCard = JsonConvert.DeserializeObject<HeroCard>(attachment.Content.ToString());
+
+            var heroCard = JsonConvert.DeserializeObject<HeroCard>(JsonConvert.SerializeObject(attachment.Content));
+
             string waoutput = "";
 
             if (heroCard != null)
