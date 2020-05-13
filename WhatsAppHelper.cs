@@ -290,10 +290,10 @@ namespace GsWhatsAppAdapter
 				// Se está conversando por Audio
 				if (isspeechturn)
 					// envia o texto como Audio
-					id = await SendVoice(activity.Text, activity.Id, activity.Recipient.Id).ConfigureAwait(false);
+					activity.Id = await SendVoice(activity.Text, activity.Id, activity.Recipient.Id).ConfigureAwait(false);
 
 				// Confere se tem Suggested Actions ( ações sugeridas )
-				if (activity.SuggestedActions != null && activity.SuggestedActions.Actions.Count() > 0)
+				if (activity.SuggestedActions != null && activity.SuggestedActions.Actions.Any())
 				{
 					// Adiciona a resposta as ações sugeridas
 					foreach (CardAction sugestedaction in activity.SuggestedActions.Actions)
@@ -310,8 +310,8 @@ namespace GsWhatsAppAdapter
                     textresponse += reply;
 				}
 				else
-					// Se não é teste, envia via API ( se enviar na mesma requisição, fica grudado na mesma mensagem )
-					id = await _gsWhatsAppClient.SendText(activity.Recipient.Id, reply).ConfigureAwait(false);
+                    // Se não é teste, envia via API ( se enviar na mesma requisição, fica grudado na mesma mensagem )
+                    activity.Id = await _gsWhatsAppClient.SendText(activity.Recipient.Id, reply).ConfigureAwait(false);
 
 			}
 
@@ -327,35 +327,35 @@ namespace GsWhatsAppAdapter
 						case "image/png":
 						case "image/jpg":
 						case "image/jpeg":
-							// Chama o método para enviar a imagem para o cliente via Gushup API
-							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.image, attachment.Name, new Uri(attachment.ContentUrl), new Uri(attachment.ThumbnailUrl)).ConfigureAwait(false);
+                            // Chama o método para enviar a imagem para o cliente via Gushup API
+                            activity.Id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.image, attachment.Name, new Uri(attachment.ContentUrl), attachment.ThumbnailUrl == null ? null : new Uri(attachment.ThumbnailUrl)).ConfigureAwait(false);
                             break;
 
 						case "application/pdf":
-							// Chama o método para enviar o video para o cliente via Gushup API
-							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.file, attachment.Name, new Uri(attachment.ContentUrl)).ConfigureAwait(false);
+                            // Chama o método para enviar o video para o cliente via Gushup API
+                            activity.Id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.file, attachment.Name, new Uri(attachment.ContentUrl)).ConfigureAwait(false);
                             break;
 
 						case "video/mpeg":
-							// Chama o método para enviar o video para o cliente via Gushup API
-							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.video, attachment.Name, new Uri(attachment.ContentUrl)).ConfigureAwait(false);
+                            // Chama o método para enviar o video para o cliente via Gushup API
+                            activity.Id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.video, attachment.Name, new Uri(attachment.ContentUrl)).ConfigureAwait(false);
                             break;
 
 						case "audio/ogg":
-							// Chama o método para enviar o video para o cliente via Gushup API
-							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.audio, attachment.Name, new Uri(attachment.ContentUrl)).ConfigureAwait(false);
+                            // Chama o método para enviar o video para o cliente via Gushup API
+                            activity.Id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.audio, attachment.Name, new Uri(attachment.ContentUrl)).ConfigureAwait(false);
                             break;
 
 						case "audio/mp3":
-							// Chama o método para enviar o video para o cliente via Gushup API
-							id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.audio, attachment.Name, new Uri(attachment.ContentUrl)).ConfigureAwait(false);
+                            // Chama o método para enviar o video para o cliente via Gushup API
+                            activity.Id = await _gsWhatsAppClient.SendMedia(activity.Recipient.Id, GsWhatsAppClient.Mediatype.audio, attachment.Name, new Uri(attachment.ContentUrl)).ConfigureAwait(false);
                             break;
 
 						case "application/vnd.microsoft.card.hero":
 							// Se é conversa por audio
 							if (isspeechturn)
-								// Envia o texto do HeroCard por audio
-								id = await SendVoiceFromHeroText(attachment, activity.Id, activity.Recipient.Id).ConfigureAwait(false);
+                                // Envia o texto do HeroCard por audio
+                                activity.Id = await SendVoiceFromHeroText(attachment, activity.Id, activity.Recipient.Id).ConfigureAwait(false);
 
 							// Se é teste 
 							if (querystringused)
@@ -365,8 +365,8 @@ namespace GsWhatsAppAdapter
 								textresponse += ConvertHeroCardToWhatsApp(attachment);
 							}
 							else
-								// envia para o cliente via API
-								id = await _gsWhatsAppClient.SendText(activity.Recipient.Id, ConvertHeroCardToWhatsApp(attachment)).ConfigureAwait(false);
+                                // envia para o cliente via API
+                                activity.Id = await _gsWhatsAppClient.SendText(activity.Recipient.Id, ConvertHeroCardToWhatsApp(attachment)).ConfigureAwait(false);
 
 							break;
 
@@ -374,7 +374,7 @@ namespace GsWhatsAppAdapter
 				}
 			}
 
-            return id;
+            return activity.Id;
 		}
 
         // Converte um HeroCard em texto puro
@@ -495,7 +495,7 @@ namespace GsWhatsAppAdapter
                 return string.Empty;
         }
         // Mensagem GupShup vinda no CallBAck da API
-        private class GsMessageObj
+        class GsMessageObj
         {
             public string From { get; set; }
             public string Id { get; set; }
@@ -507,7 +507,7 @@ namespace GsWhatsAppAdapter
             public GsVoice Voice { get; set; }
         }
         // Mensagem de Voz - padrão GupShup
-        private class GsVoice
+        class GsVoice
         {
             public string Id { get; set; }
             public string Mime_type { get; set; }

@@ -13,9 +13,9 @@ namespace GsWhatsAppAdapter
 		[JsonProperty(PropertyName = "text")]
 		public string Text { get; set; }
 		[JsonProperty(PropertyName = "images")]
-		public IList<CardImage> Images { get; set; }
+		public IList<CardImage> Images { get; }
 		[JsonProperty(PropertyName = "buttons")]
-		public IList<CardAction> Buttons { get; set; }
+		public IList<CardAction> Buttons { get; }
 		[JsonProperty(PropertyName = "tap")]
 		public CardAction Tap { get; set; }
 	}

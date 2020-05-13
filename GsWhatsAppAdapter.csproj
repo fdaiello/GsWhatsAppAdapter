@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>1.0.2</Version>
+    <Version>1.0.8</Version>
     <Description>WhatsApp Custom Adapter for Microsoft Bot Framewok</Description>
     <Copyright>Mister Postman - Felipe Daielo - fdaiello@miserpostman.com.br - 2020</Copyright>
   </PropertyGroup>
@@ -13,7 +13,7 @@
     <PackageReference Include="Microsoft.Bot.Builder.Integration.AspNet.Core" Version="4.8.0" />
     <PackageReference Include="Microsoft.CognitiveServices.Speech" Version="1.11.0" />
     <PackageReference Include="NAudio" Version="1.10.0" />
-    <PackageReference Include="NAudio.Lame" Version="1.1.1" />
+    <PackageReference Include="NAudio.Lame" Version="1.1.0" />
   </ItemGroup>
 
 </Project>
