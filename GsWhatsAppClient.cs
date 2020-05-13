@@ -25,6 +25,9 @@ namespace GsWhatsAppAdapter
 		// Constructor
 		public GsWhatsAppClient(WhatsAppAdapterOptions options)
 		{
+			if (options == null)
+				throw new ArgumentException("Argument missing:", nameof(options));
+
 			gsApiKey = options.GsApiKey;
 			whatsAppNumber = options.WhatsAppNumber;
 			gsApiUri = options.GsApiUri;
@@ -43,9 +46,7 @@ namespace GsWhatsAppAdapter
 		{
 
 			if (contentUri == null)
-			{
-				throw new ArgumentException("ContentUri cannot be null");
-			}
+				throw new ArgumentException("Argument missing:", nameof(contentUri));
 
 			HttpClient httpClient = new HttpClient();
 			try
@@ -80,6 +81,7 @@ namespace GsWhatsAppAdapter
 				var httpResponseMessage = await httpClient.PostAsync(gsApiUri, httpContent).ConfigureAwait(false);
 				string resp = await httpResponseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
 				httpContent.Dispose();
+				httpClient.Dispose();
 
 				// Desserializa o objeto mensagem
 				GsReturn gsReturn = JsonConvert.DeserializeObject<GsReturn>(resp);
@@ -117,6 +119,7 @@ namespace GsWhatsAppAdapter
 				string resp = await httpResponseMessage.Content.ReadAsStringAsync().ConfigureAwait(false);
 
 				httpContent.Dispose();
+				httpClient.Dispose();
 
 				// Desserializa o objeto mensagem
 				GsReturn gsReturn = JsonConvert.DeserializeObject<GsReturn>(resp);

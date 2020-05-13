@@ -18,6 +18,7 @@ using Microsoft.Bot.Builder;
 using Microsoft.Bot.Schema;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Linq;
 
 namespace GsWhatsAppAdapter
 {
@@ -45,6 +46,9 @@ namespace GsWhatsAppAdapter
         /// <param name="logger">The ILogger implementation this adapter should use.</param>
         public WhatsAppAdapter(IConfiguration configuration, ILogger logger)
         {
+            if (configuration == null)
+                throw new ArgumentNullException(nameof(configuration));
+
             gsWhatsAppClient = new GsWhatsAppClient(new WhatsAppAdapterOptions(configuration["GsSettings:WaNumber"], configuration["GsSettings:GsApiKey"], new Uri(configuration["GsSettings:GsApiUri"]), new Uri(configuration["GsSettings:GsMediaUri"])));
             speechClient = new SpeechClient(new SpeechOptions(configuration["SpeechSubcriptionKey"], configuration["SpeechRegion"], configuration["Language"]), logger);
             whatsAppHelper = new WhatsAppHelper(gsWhatsAppClient, speechClient, new Uri( configuration["BotUrl"]));
@@ -66,11 +70,6 @@ namespace GsWhatsAppAdapter
         public override async Task<ResourceResponse[]> SendActivitiesAsync(ITurnContext turnContext, Activity[] activities, CancellationToken cancellationToken)
         {
 
-            if ( activities == null)
-            {
-                throw new ArgumentException(nameof(activities));
-            }
-
             int loopcount = 0;
             var responses = new List<ResourceResponse>();
             foreach (var activity in activities)
@@ -81,7 +80,7 @@ namespace GsWhatsAppAdapter
                 }
                 else
                 {
-                    var res = await whatsAppHelper.SendActivityToWhatsApp(activity);
+                    var res = await whatsAppHelper.SendActivityToWhatsApp(activity).ConfigureAwait(false);
 
                     var response = new ResourceResponse() { Id = res, };
 
@@ -113,32 +112,43 @@ namespace GsWhatsAppAdapter
         public async Task ProcessAsync(HttpRequest httpRequest, HttpResponse httpResponse, IBot bot, CancellationToken cancellationToken)
         {
             if (httpRequest == null)
-            {
                 throw new ArgumentNullException(nameof(httpRequest));
-            }
 
             if (httpResponse == null)
-            {
                 throw new ArgumentNullException(nameof(httpResponse));
-            }
 
             if (bot == null)
-            {
                 throw new ArgumentNullException(nameof(bot));
-            }
 
-            var activity = await whatsAppHelper.PayloadToActivity(httpRequest, logger); 
-
-            // create a conversation reference
-            using (var context = new TurnContext(this, activity))
+            // Confere se o httpRequest um evento
+            if ( httpRequest.HasFormContentType && ! string.IsNullOrEmpty(httpRequest.Form["requestType"]) && httpRequest.Form["requestType"]== "event" )
             {
-                context.TurnState.Add("httpStatus", HttpStatusCode.OK.ToString("D"));
-                await RunPipelineAsync(context, bot.OnTurnAsync, cancellationToken).ConfigureAwait(false);
+                // TODO: Process Events GsAPI Events
 
-                var statusCode = Convert.ToInt32(context.TurnState.Get<string>("httpStatus"), CultureInfo.InvariantCulture);
-                var text = context.TurnState.Get<object>("httpBody") != null ? context.TurnState.Get<object>("httpBody").ToString() : string.Empty;
 
+                // Devolve resposta em branco: Ok
+                int statusCode = 200;
+                string text = string.Empty;
+                whatsAppHelper.querystringused = false;
+                whatsAppHelper.textresponse = string.Empty;
                 await whatsAppHelper.WriteAsync(httpResponse, statusCode, text, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+
+            }
+            // Caso contrario tem que ser mensagem
+            {
+                var activity = await whatsAppHelper.PayloadToActivity(httpRequest, logger).ConfigureAwait(false);
+
+                // create a conversation reference
+                using (var context = new TurnContext(this, activity))
+                {
+                    context.TurnState.Add("httpStatus", HttpStatusCode.OK.ToString("D"));
+                    await RunPipelineAsync(context, bot.OnTurnAsync, cancellationToken).ConfigureAwait(false);
+
+                    var statusCode = Convert.ToInt32(context.TurnState.Get<string>("httpStatus"), CultureInfo.InvariantCulture);
+                    var text = context.TurnState.Get<object>("httpBody") != null ? context.TurnState.Get<object>("httpBody").ToString() : string.Empty;
+
+                    await whatsAppHelper.WriteAsync(httpResponse, statusCode, text, Encoding.UTF8, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
 
@@ -191,14 +201,10 @@ namespace GsWhatsAppAdapter
         public async Task ContinueConversationAsync(ConversationReference reference, BotCallbackHandler logic, CancellationToken cancellationToken)
         {
             if (reference == null)
-            {
                 throw new ArgumentNullException(nameof(reference));
-            }
 
             if (logic == null)
-            {
                 throw new ArgumentNullException(nameof(logic));
-            }
 
             var request = reference.GetContinuationActivity().ApplyConversationReference(reference, true);
 
@@ -227,6 +233,9 @@ namespace GsWhatsAppAdapter
         /// <seealso cref="BotAdapter.RunPipelineAsync(ITurnContext, BotCallbackHandler, CancellationToken)"/>
         public override async Task ContinueConversationAsync(ClaimsIdentity claimsIdentity, ConversationReference reference, BotCallbackHandler callback, CancellationToken cancellationToken)
         {
+            if (reference == null)
+                throw new ArgumentNullException(nameof(reference));
+
             using (var context = new TurnContext(this, reference.GetContinuationActivity()))
             {
                 context.TurnState.Add<IIdentity>(BotIdentityKey, claimsIdentity);

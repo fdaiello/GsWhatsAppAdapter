@@ -2,6 +2,10 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Version>1.0.2</Version>
+    <Description>WhatsApp Custom Adapter for Microsoft Bot Framewok</Description>
+    <Copyright>Mister Postman - Felipe Daielo - fdaiello@miserpostman.com.br - 2020</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
