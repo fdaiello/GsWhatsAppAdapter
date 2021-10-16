@@ -11,3 +11,9 @@ Whe are using GupShup as the oficial broker.
 
 - This adatper also uses Microsoft Cognitive Services to reconize speech to text, and convert text-to-speech.
 - It also converts WhatsApp OGA audios to Wav, so it can be sento to Microsoft Speech to Text service.
+
+# Environment
+
+- Net Core 3.1
+- Microsoft Bot Framework 4.8
+- C#
